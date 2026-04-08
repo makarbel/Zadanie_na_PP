@@ -1,0 +1,131 @@
+import psycopg2
+from psycopg2 import extras
+from entities.user import User
+
+
+class DBManager:
+    def __init__(self):
+        self.conn_params = {
+            "dbname": "db_3",
+            "user": "postgres",
+            "password": "12345",
+            "host": "localhost",
+            "port": "5433"
+        }
+        self._create_table_if_not_exists()
+
+    def _get_connection(self):
+        return psycopg2.connect(**self.conn_params)
+
+    def _create_table_if_not_exists(self):
+        create_sql = """
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                login VARCHAR(50) UNIQUE NOT NULL,
+                password VARCHAR(50) NOT NULL,
+                role VARCHAR(20) NOT NULL CHECK (role IN ('Администратор', 'Пользователь')),
+                is_blocked BOOLEAN DEFAULT FALSE
+            )
+        """
+        insert_admin_sql = """
+            INSERT INTO users (login, password, role)
+            SELECT 'admin', 'admin', 'Администратор'
+            WHERE NOT EXISTS (SELECT 1 FROM users WHERE login = 'admin')
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(create_sql)
+                    cur.execute(insert_admin_sql)
+                conn.commit()
+        except Exception as e:
+            print(f"DB Error: {e}")
+
+    def get_user(self, login):
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
+                    cur.execute("SELECT * FROM users WHERE login = %s", (login,))
+                    row = cur.fetchone()
+                    if row:
+                        return User(row['login'], row['password'], row['role'], row['is_blocked'])
+                    return None
+        except Exception:
+            return None
+
+    def get_all_users(self):
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
+                    cur.execute("SELECT login, password, role, is_blocked FROM users ORDER BY login")
+                    return [User(r['login'], r['password'], r['role'], r['is_blocked']) for r in cur.fetchall()]
+        except Exception:
+            return []
+
+    def add_user(self, login, password, role):
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO users (login, password, role) VALUES (%s, %s, %s)",
+                        (login, password, role)
+                    )
+                conn.commit()
+                return True
+        except Exception:
+            return False
+
+    def update_user(self, original_login, new_login, new_password, new_role):
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE users SET login=%s, password=%s, role=%s WHERE login=%s",
+                        (new_login, new_password, new_role, original_login)
+                    )
+                conn.commit()
+                return True
+        except Exception:
+            return False
+
+    def block_user(self, login):
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE users SET is_blocked = TRUE WHERE login = %s", (login,))
+                conn.commit()
+        except Exception:
+            pass
+
+    def unblock_user(self, login):
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE users SET is_blocked = FALSE WHERE login = %s", (login,))
+                conn.commit()
+                return True
+        except Exception:
+            return False
+
+    def toggle_block_status(self, login):
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE users SET is_blocked = NOT is_blocked WHERE login = %s",
+                        (login,)
+                    )
+                conn.commit()
+                return True
+        except Exception:
+            return False
+
+    def delete_user(self, login):
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM users WHERE login = %s", (login,))
+                conn.commit()
+                return True
+        except Exception:
+            return False
